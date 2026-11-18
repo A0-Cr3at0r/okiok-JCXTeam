@@ -45,6 +45,7 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
 
 
 @mcp.tool()
+<<<<<<< HEAD
 async def televerser(fichier: str, node_id: str = "") -> str:
     """Téléverse un fichier local vers un dossier S-Filer identifié par son node_id."""
 
@@ -64,6 +65,20 @@ async def televerser(fichier: str, node_id: str = "") -> str:
         return "ERREUR : Le téléversement du fichier vers S-Filer a échoué."
 
     return security.nettoyer_sortie(resultat)
+=======
+async def televerser(fichier: str, dossier: str = "", communaute: str = "") -> str:
+    """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
+    client, csrf_token = await _creer_client_authentifie()
+    try:
+        node_id = ""
+        if communaute:
+            node_id = await _obtenir_noeud_racine(client, csrf_token, communaute=communaute)
+        elif dossier.isdigit():
+            node_id = dossier
+        return await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
+    finally:
+        await client.aclose()
+>>>>>>> f1426fc7949d549e4b3b9036a0301d1a0be68b4e
 
 
 @mcp.tool()
@@ -78,6 +93,7 @@ async def partager(
     if alerte := security.valider_chemin_local(fichier):
         return alerte
 
+<<<<<<< HEAD
     if not Path(fichier).is_file():
         return "ERREUR : Le fichier spécifié n'existe pas ou n'est pas un fichier valide."
 
@@ -87,6 +103,12 @@ async def partager(
         expiration_jours,
         confirme,
     )
+=======
+    if alerte := security.valider_chemin_local(fichier):
+        return alerte
+
+    alerte = security.verifier_partage(fichier, destinataire, expiration_jours, confirme)
+>>>>>>> f1426fc7949d549e4b3b9036a0301d1a0be68b4e
     if alerte:
         return alerte
 

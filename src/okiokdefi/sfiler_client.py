@@ -39,7 +39,7 @@ def _extraire_csrf(html: str) -> str:
     motifs = [
         r'name=["\']CSRFToken["\'][^>]*value=["\']([a-zA-Z0-9]+)["\']',
         r'csrf-token=["\']([a-zA-Z0-9]+)["\']',
-        r'CSRFToken=([a-zA-Z0-9]+)',
+        r"CSRFToken=([a-zA-Z0-9]+)",
     ]
     for motif in motifs:
         match = re.search(motif, html, re.IGNORECASE)
@@ -77,8 +77,13 @@ async def _creer_client_authentifie() -> tuple[httpx.AsyncClient, str]:
                 "loginForm.directAccessToken": "",
                 "loginForm.password": PASSWORD,
             },
+            follow_redirects=False,
         )
         _nettoyer_cookies_session(client)
+
+        if resp_login.is_redirect and "location" in resp_login.headers:
+            await client.get(resp_login.headers["location"])
+            _nettoyer_cookies_session(client)
 
         resp_tree = await client.get("/Tree.action")
         _nettoyer_cookies_session(client)
@@ -96,9 +101,9 @@ async def _creer_client_authentifie() -> tuple[httpx.AsyncClient, str]:
         raise
 
 
-def _chiffrer_fichier_sfiler(contenu: bytes, system_public_key_b64: str) -> tuple[bytes, str, str]:
+def _chiffrer_fichier_sfiler(contenu: bytes, wrapping_public_key_b64: str) -> tuple[bytes, str, str]:
     """Chiffre le fichier en AES-128-CTR et enveloppe la clé symétrique avec RSA-OAEP SHA-256."""
-    cle_der = base64.b64decode(system_public_key_b64)
+    cle_der = base64.b64decode(wrapping_public_key_b64)
     try:
         pub_key = serialization.load_der_public_key(cle_der)
     except ValueError:
@@ -131,19 +136,40 @@ def _chiffrer_fichier_sfiler(contenu: bytes, system_public_key_b64: str) -> tupl
     )
 
 
-async def _obtenir_noeud_racine(client: httpx.AsyncClient) -> str:
-    """Récupère le premier nodeId disponible dans l'arborescence de l'utilisateur."""
-    resp = await client.post("/TreeBuilder.action")
+async def _obtenir_noeud_racine(client: httpx.AsyncClient, csrf_token: str, communaute: str = "") -> str:
+    """Récupère le treeNodeId du dossier racine (boîte de réception ou communauté ciblée)."""
+    action_param = ""
+    if communaute:
+        tree_resp = await client.post("/TreeBuilder.action", data={"CSRFToken": csrf_token})
+        tree_resp.raise_for_status()
+        for entry in tree_resp.json().get("entry", []):
+            if communaute.lower() in entry.get("nodeName", "").lower():
+                action_id = entry.get("nodeActionId", "")
+                if action_id.startswith("tree_community"):
+                    comm_id = action_id.removeprefix("tree_community")
+                    action_param = f"communityId={comm_id}"
+                    break
+
+    resp = await client.get(
+        "/FileListAjax.action",
+        params={
+            "search_box": "",
+            "treeNodeId": "",
+            "nbrRow": 25,
+            "action": action_param,
+            "CSRFToken": csrf_token,
+        },
+    )
     resp.raise_for_status()
-    match = re.search(r'"id"\s*:\s*"?(\d+)"?', resp.text)
+    match = re.search(r'name=["\']treeNodeId["\'][^>]*value=["\'](\d+)["\']', resp.text)
     if not match:
-        raise SFilterSessionError("Impossible de déterminer un nodeId cible dans l'arborescence.")
+        raise SFilterSessionError("Impossible de trouver treeNodeId dans FileListAjax.action.")
     return match.group(1)
 
 
 async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
     """Recherche des fichiers via RecentFilesAjax.action et l'arborescence TreeBuilder.action."""
-    client, _ = await _creer_client_authentifie()
+    client, csrf_token = await _creer_client_authentifie()
     try:
         params: dict[str, Any] = {
             "search_box": requete,
@@ -152,6 +178,7 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
             "filter": "",
             "fromRecentFiles": "",
             "fromSentFiles": "",
+            "CSRFToken": csrf_token,
         }
         if envoyeur:
             params["sender"] = envoyeur
@@ -159,8 +186,8 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
         resp = await client.get("/RecentFilesAjax.action", params=params)
         resp.raise_for_status()
 
-        if not resp.text.strip():
-            tree_resp = await client.post("/TreeBuilder.action")
+        if not resp.text.strip() or "Une erreur s'est produite" in resp.text:
+            tree_resp = await client.post("/TreeBuilder.action", data={"CSRFToken": csrf_token})
             tree_resp.raise_for_status()
             return tree_resp.text
 
@@ -169,42 +196,80 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
         await client.aclose()
 
 
-async def televerser(fichier: str, node_id: str = "") -> str:
-    """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
+async def _televerser_avec_session(
+    client: httpx.AsyncClient,
+    csrf_token: str,
+    fichier: str,
+    node_id: str = "",
+) -> str:
+    """Exécute le téléversement chiffré E2EE en 2 étapes sur ajaxupload (1: roaming init, 2: multipart chiffré)."""
     chemin = Path(fichier)
     contenu_clair = chemin.read_bytes()
+    cible_node_id = node_id or await _obtenir_noeud_racine(client, csrf_token)
 
-    client, csrf_token = await _creer_client_authentifie()
-    try:
-        cible_node_id = node_id or await _obtenir_noeud_racine(client)
+    base_headers = {
+        "useEndToEndEncryption": "true",
+        "Referer": f"{BASE_URL}/Tree.action",
+    }
 
-        # Récupérer le certificat système depuis l'API interne v3
-        key_resp = await client.post("/internal/api/v3/transfers/retrieve-system-public-key")
-        key_resp.raise_for_status()
-        key_info = key_resp.json()
-
-        contenu_chiffre, wrapped_key_b64, iv_b64 = _chiffrer_fichier_sfiler(
-            contenu_clair,
-            key_info["systemPublicKey"],
-        )
-
-        form_data = {
+    # Étape 1 : Initialisation roaming en application/x-www-form-urlencoded
+    init_resp = await client.post(
+        "/ajaxupload",
+        data={
             "CSRFToken": csrf_token,
             "nodeId": str(cible_node_id),
             "size": str(len(contenu_clair)),
-            "systemCertificateId": str(key_info["systemCertificateId"]),
-            "wrappedSymmetricKey": wrapped_key_b64,
-            "wrappingAlgorithm": "RSA/ECB/OAEPwithSHA-256andMGF1Padding",
-            "iv": iv_b64,
-            "digestAlgorithm": "SHA-1",
-        }
-        files = {
-            "uploadfile": (chemin.name, contenu_chiffre, "application/octet-stream"),
-        }
+            "uploadfile": chemin.name,
+        },
+        headers={**base_headers, "roaming": "true"},
+    )
+    init_resp.raise_for_status()
+    roaming = init_resp.json().get("roamingInfos", {})
 
-        resp = await client.post("/ajaxupload", data=form_data, files=files)
-        resp.raise_for_status()
-        return resp.text or f"Fichier '{chemin.name}' téléversé avec succès dans le noeud {cible_node_id}."
+    pub_key_b64 = roaming.get("wrappingPublicKey")
+    cert_id = roaming.get("systemCertificateId")
+    digest_algo = roaming.get("digestAlgorithm", "SHA-1")
+
+    if not pub_key_b64:
+        key_resp = await client.post("/internal/api/v3/transfers/retrieve-system-public-key")
+        key_resp.raise_for_status()
+        key_info = key_resp.json()
+        pub_key_b64 = key_info["systemPublicKey"]
+        cert_id = key_info["systemCertificateId"]
+
+    contenu_chiffre, wrapped_key_b64, iv_b64 = _chiffrer_fichier_sfiler(contenu_clair, pub_key_b64)
+
+    # Étape 2 : Envoi du binaire chiffré en multipart/form-data avec CSRFToken & nodeId en query string
+    form_data = {
+        "CSRFToken": csrf_token,
+        "nodeId": str(cible_node_id),
+        "size": str(len(contenu_clair)),
+        "systemCertificateId": str(cert_id),
+        "wrappedSymmetricKey": wrapped_key_b64,
+        "wrappingAlgorithm": "RSA/ECB/OAEPwithSHA-256andMGF1Padding",
+        "iv": iv_b64,
+        "digestAlgorithm": digest_algo,
+    }
+    files = {
+        "uploadfile": (chemin.name, contenu_chiffre, "application/octet-stream"),
+    }
+
+    upload_resp = await client.post(
+        "/ajaxupload",
+        params={"CSRFToken": csrf_token, "nodeId": str(cible_node_id)},
+        data=form_data,
+        files=files,
+        headers=base_headers,
+    )
+    upload_resp.raise_for_status()
+    return upload_resp.text
+
+
+async def televerser(fichier: str, node_id: str = "") -> str:
+    """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
+    client, csrf_token = await _creer_client_authentifie()
+    try:
+        return await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
     finally:
         await client.aclose()
 
@@ -215,12 +280,11 @@ async def partager(
     expiration_jours: int = 7,
     message: str = "",
 ) -> str:
-    """Crée un transfert anonyme / envoi rapide et y téléverse le fichier."""
-    client, _ = await _creer_client_authentifie()
+    """Crée un transfert anonyme / envoi rapide et y téléverse le fichier dans la même session."""
+    client, csrf_token = await _creer_client_authentifie()
     try:
         maintenant = datetime.now(tz=UTC)
         horodatage = maintenant.strftime("%Y-%m-%d %H.%M.%S")
-        # Nom sans caractère '?' pour éviter l'erreur 400 (code 5018) de S-Filer
         share_name = f"Partage MCP {Path(fichier).name} {horodatage}"
         date_expiration = (maintenant.date() + timedelta(days=expiration_jours)).isoformat()
 
@@ -246,20 +310,19 @@ async def partager(
         resp = await client.post("/api/v3/http/anonymous-transfer", json=payload)
         resp.raise_for_status()
         transfer_info = resp.json()
+
+        node_id = str(transfer_info.get("nodeId") or transfer_info.get("folderId") or "")
+        if node_id and Path(fichier).exists():
+            await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
+
+        return f"Partage '{share_name}' créé pour {destinataire} (expiration : {date_expiration}). Réponse : {transfer_info}"
     finally:
         await client.aclose()
-
-    # Si un chemin local est fourni et que l'API retourne un nodeId / folderId, on téléverse le fichier dedans
-    node_id = str(transfer_info.get("nodeId") or transfer_info.get("folderId") or "")
-    if node_id and Path(fichier).exists():
-        await televerser(fichier, node_id=node_id)
-
-    return f"Partage '{share_name}' créé pour {destinataire} (expiration : {date_expiration}). Réponse : {transfer_info}"
 
 
 async def lister_activite(jours: int = 7) -> str:
     """Liste l'activité récente sur le compte S-Filer."""
-    client, _ = await _creer_client_authentifie()
+    client, csrf_token = await _creer_client_authentifie()
     try:
         resp = await client.get(
             "/RecentFilesAjax.action",
@@ -271,6 +334,7 @@ async def lister_activite(jours: int = 7) -> str:
                 "fromRecentFiles": "true",
                 "fromSentFiles": "",
                 "days": jours,
+                "CSRFToken": csrf_token,
             },
         )
         resp.raise_for_status()
