@@ -177,50 +177,52 @@ Cette solution a été retenue afin de permettre une intégration avec l'environ
 
 ---
 
-## Installation
+## Installation (en 2 étapes)
 
 ### Prérequis
 
-- Python **3.15 ou supérieur**.
-- [uv](https://docs.astral.sh/uv/) pour la gestion de l'environnement et des dépendances.
+- [uv](https://docs.astral.sh/uv/) installé sur la machine (`curl -LsSf https://astral.sh/uv/install.sh | sh` sous Linux/macOS ou `winget install astral-sh.uv` sous Windows).
 - Un compte utilisateur disposant d'un accès à S-Filer.
 
-### 1. Récupération du projet
+---
+
+Une fois le projet cloné (`git clone <URL> && cd okiokdefi`), l'installation s'effectue en **deux étapes simples** :
+
+### Étape 1 — Configuration des variables d'environnement
+
+Copier le fichier d'exemple et renseigner vos identifiants S-Filer :
 
 ```bash
-git clone <URL_DU_DEPOT>
-cd <DOSSIER_DU_PROJET>
+cp .env.example .env
 ```
 
-### 2. Installation des dépendances
-
-```bash
-uv sync
-```
-
-Cette commande crée l'environnement virtuel et installe les dépendances définies dans `pyproject.toml`, en utilisant le fichier `uv.lock` lorsqu'il est présent.
-
-### 3. Configuration des variables d'environnement
-
-Créer un fichier `.env` à la racine du projet :
+Éditer le fichier `.env` avec vos accès S-Filer :
 
 ```env
 SFILER_BASE_URL=https://sfilerdemo2.sfiler.com/sfiler
-SFILER_USERNAME=mail@example.com
-SFILER_PASSWORD=your_password
+SFILER_USERNAME=votre_courriel@exemple.com
+SFILER_PASSWORD=votre_mot_de_passe
 SFILER_DOMAIN_ID=1
 ```
 
 | Variable | Description |
 |---|---|
 | `SFILER_BASE_URL` | Adresse de l'instance S-Filer. |
-| `SFILER_USERNAME` | Identifiant du compte utilisateur. |
+| `SFILER_USERNAME` | Identifiant du compte utilisateur (adresse courriel). |
 | `SFILER_PASSWORD` | Mot de passe du compte utilisateur. |
-| `SFILER_DOMAIN_ID` | Identifiant du domaine S-Filer. |
+| `SFILER_DOMAIN_ID` | Identifiant du domaine S-Filer (par défaut `1`). |
 
-Les valeurs présentées sont des exemples. Elles doivent être remplacées par celles de l'environnement cible.
+> **Important :** Le fichier `.env` contient des secrets et est automatiquement ignoré par Git via le `.gitignore`.
 
-**Important :** le fichier `.env` contient des informations d'authentification et ne doit jamais être versionné dans Git. Il est recommandé de l'ajouter au `.gitignore`.
+### Étape 2 — Installation des dépendances
+
+Exécuter la synchronisation de l'environnement :
+
+```bash
+uv sync
+```
+
+Cette commande unique crée l'environnement virtuel `.venv`, installe l'interpréteur Python approprié et verrouille les dépendances exactement selon le fichier `uv.lock`. L'installation est terminée.
 
 ---
 
@@ -444,4 +446,22 @@ okiok-JCXTeam/
 
 ---
 
+## Limites connues
+
+1. **Intégration hybride S-Filer** : En raison des permissions restreintes du compte utilisateur bac à sable sur l'API REST interne (codes 401 sur `/reports/*`), la consultation de l'activité et la recherche de fichiers s'appuient sur les requêtes authentifiées du portail web (`RecentFilesAjax.action`), couplées à un parseur strict qui élimine tout artefact HTML. Une implémentation 100% basée sur le Swagger REST officiel est également disponible sur la branche Git `swagger-rest-api`.
+2. **Chiffrement E2EE AES-128-CTR** : Le chiffrement symétrique respecte le standard imposé par le client S-Filer (AES-CTR + enveloppement RSA-OAEP SHA-256). Il assure la confidentialité des fichiers en transit mais ne fournit pas d'authentification cryptographique de message (HMAC) native sans signature applicative additionnelle.
+3. **Confirmation humaine** : La protection par code éphémère à usage unique garantit qu'aucune exfiltration ou action sensible ne peut être déclenchée automatiquement par une injection de prompt indirecte. Cependant, cette protection dépend de la vigilance de l'utilisateur qui approuve le partage.
+
+---
+
+## Crédits
+
+- **Projet** : Assistant IA pour S-Filer — Défi Étudiant S-Filer 2026.
+- **Équipe** : JCXTeam / Drag0flyer (`khobaib_ayyaz@outlook.fr`).
+- **Organisation** : [OKIOK](https://www.okiok.com/) — La cybersécurité simplifiée.
+
+---
+
 ## Licence
+
+Projet réalisé dans le cadre du Défi Étudiant OKIOK 2026. Tous droits réservés.
