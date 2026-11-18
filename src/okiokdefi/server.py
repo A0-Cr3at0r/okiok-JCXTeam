@@ -35,22 +35,17 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
 
 @mcp.tool()
 async def televerser(fichier: str, dossier: str = "", communaute: str = "") -> str:
-    """Téléverse un fichier local vers un dossier ou une communauté S-Filer."""
-
-    if alerte := security.valider_chemin_local(fichier):
-        return alerte
-
-    for valeur, nom in ((dossier, "dossier"), (communaute, "communaute")):
-        if alerte := security.valider_texte_sfiler(valeur, nom):
-            return alerte
-
+    """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
+    client, csrf_token = await _creer_client_authentifie()
     try:
-        resultat = await sfiler_client.televerser(fichier=fichier, dossier=dossier, communaute=communaute)
-    except Exception:
-        logger.exception("Erreur lors de l'appel à S-Filer")
-        return "ERREUR : Le téléversement du fichier vers S-Filer a échoué."
-
-    return security.nettoyer_sortie(resultat)
+        node_id = ""
+        if communaute:
+            node_id = await _obtenir_noeud_racine(client, csrf_token, communaute=communaute)
+        elif dossier.isdigit():
+            node_id = dossier
+        return await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
+    finally:
+        await client.aclose()
 
 
 @mcp.tool()
@@ -58,6 +53,9 @@ async def partager(fichier: str, destinataire: str, expiration_jours: int = 7, c
     """Partage un fichier S-Filer avec un destinataire externe avec une durée d'expiration."""
 
     if alerte := security.valider_texte_sfiler(fichier, "fichier", max_len=255):
+        return alerte
+
+    if alerte := security.valider_chemin_local(fichier):
         return alerte
 
     alerte = security.verifier_partage(fichier, destinataire, expiration_jours, confirme)
