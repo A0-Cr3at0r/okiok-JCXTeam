@@ -361,7 +361,7 @@ Pour vérifier le fonctionnement, demander à Copilot d'utiliser un outil non de
 
 ```text
 Utilise l'outil lister_activite pour consulter les activités
-récentes de mon compte S-Filer sur les 7 derniers jours.
+récentes de moompte S-Filer sur les 7 derniers jours.
 ```
 
 Il est également possible de tester la recherche :
