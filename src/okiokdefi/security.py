@@ -1,8 +1,6 @@
-import os
-from pathlib import Path
 import re
+from pathlib import Path
 
-# pas fini
 
 def nettoyer_sortie(donnees: str) -> str:
     """Neutralise l'injection indirecte et le Memory Poisoning."""
@@ -40,7 +38,7 @@ def valider_chemin_local(chemin_fichier: str, dossier_base: Path | None = None) 
     return None
 
 def valider_texte_sfiler(valeur: str, nom_champ: str, max_len: int = 120) -> str | None:
-    """Prévient le Downstream System Injection vers l'API REST S-Filer ."""
+    """Prévient le Downstream System Injection vers l'API REST."""
 
     if len(valeur) > max_len:
         return f"ERREUR : Le champ '{nom_champ}' dépasse {max_len} caractères."
