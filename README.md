@@ -253,16 +253,37 @@ L'option `-m` permet à Python d'exécuter `okiokdefi.server` en tant que module
 
 ### Intégration avec Antigravity
 
-Le serveur peut être intégré directement à **Antigravity** (Antigravity CLI ou Antigravity IDE) afin que l'agent IA puisse découvrir et exploiter ses outils MCP en langage naturel.
+Le serveur peut être intégré directement à **Antigravity** (Antigravity CLI `agy` ou Antigravity IDE) afin que l'agent IA puisse découvrir et exploiter ses outils MCP en langage naturel.
 
-Deux possibilités de configuration sont disponibles :
+Deux méthodes d'intégration sont disponibles :
 
-- **Configuration au niveau du projet** (recommandée) : via un fichier `.mcp.json` placé à la racine du dépôt.
-- **Configuration globale Antigravity** : ajout du serveur dans la configuration globale d'Antigravity (`~/.gemini/antigravity-cli/mcp/` ou `%USERPROFILE%\.gemini\antigravity-cli\mcp\`).
+- **Méthode 1 — En une commande via le CLI `agy` (recommandée)** : Enregistrement instantané du serveur MCP dans Antigravity.
+- **Méthode 2 — Configuration déclarative via `.mcp.json`** : Pratique pour le partage de configuration au niveau de l'espace de travail.
 
-#### Option 1 — Configuration au niveau du projet (recommandée)
+---
 
-Créer un fichier nommé `.mcp.json` à la racine du dépôt :
+#### Méthode 1 — En une commande via le CLI `agy` (recommandée)
+
+Depuis la racine du projet, exécuter simplement :
+
+```bash
+agy mcp add sfiler-mcp -- uv run python -m okiokdefi.server
+```
+
+*(Ou en spécifiant le chemin absolu du projet avec `--directory`) :*
+
+```bash
+agy mcp add sfiler-mcp -- uv run --directory /CHEMIN/VERS/LE/PROJET python -m okiokdefi.server
+```
+
+> **Pourquoi cette méthode est idéale ?**
+> Grâce au gestionnaire `uv`, la commande `uv run` détecte automatiquement `pyproject.toml` et `uv.lock`, crée le `.venv` à la volée s'il n'existe pas encore, installe les dépendances et démarre le serveur MCP STDIO. Aucun `uv sync` préalable n'est obligatoire !
+
+---
+
+#### Méthode 2 — Configuration déclarative via `.mcp.json`
+
+Pour enregistrer le serveur au niveau du projet (partageable dans l'équipe), créer un fichier nommé `.mcp.json` à la racine du dépôt :
 
 ```text
 okiok-JCXTeam/
@@ -277,7 +298,7 @@ Contenu du fichier `.mcp.json` :
 ```json
 {
   "mcpServers": {
-    "sfiler": {
+    "sfiler-mcp": {
       "type": "stdio",
       "command": "uv",
       "args": [
