@@ -1,7 +1,8 @@
 import base64
 import os
 import re
-from datetime import UTC, datetime, timedeltafrom pathlib import Path
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -36,9 +37,9 @@ def _nettoyer_cookies_session(client: httpx.AsyncClient) -> None:
 def _extraire_csrf(html: str) -> str:
     """Extrait le jeton CSRF depuis le HTML de Tree.action."""
     motifs = [
-        r'CSRFToken["\']?\s*[:=]\s*["\']([a-zA-Z0-9]+)["\']',
-        r'name=["\']X-CSRF-Token["\']\s+content=["\']([^"\']+)["\']',
-        r'X-CSRF-Token["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'name=["\']CSRFToken["\'][^>]*value=["\']([a-zA-Z0-9]+)["\']',
+        r'csrf-token=["\']([a-zA-Z0-9]+)["\']',
+        r'CSRFToken=([a-zA-Z0-9]+)',
     ]
     for motif in motifs:
         match = re.search(motif, html, re.IGNORECASE)
@@ -143,7 +144,7 @@ async def _obtenir_noeud_racine(client: httpx.AsyncClient) -> str:
 async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
     """Recherche des fichiers via RecentFilesAjax.action et l'arborescence TreeBuilder.action."""
     client, _ = await _creer_client_authentifie()
-    async with client:
+    try:
         params: dict[str, Any] = {
             "search_box": requete,
             "treeNodeId": "",
@@ -164,6 +165,8 @@ async def rechercher_fichiers(requete: str = "", envoyeur: str = "") -> str:
             return tree_resp.text
 
         return resp.text
+    finally:
+        await client.aclose()
 
 
 async def televerser(fichier: str, node_id: str = "") -> str:
@@ -172,7 +175,7 @@ async def televerser(fichier: str, node_id: str = "") -> str:
     contenu_clair = chemin.read_bytes()
 
     client, csrf_token = await _creer_client_authentifie()
-    async with client:
+    try:
         cible_node_id = node_id or await _obtenir_noeud_racine(client)
 
         # Récupérer le certificat système depuis l'API interne v3
@@ -202,6 +205,8 @@ async def televerser(fichier: str, node_id: str = "") -> str:
         resp = await client.post("/ajaxupload", data=form_data, files=files)
         resp.raise_for_status()
         return resp.text or f"Fichier '{chemin.name}' téléversé avec succès dans le noeud {cible_node_id}."
+    finally:
+        await client.aclose()
 
 
 async def partager(
@@ -212,7 +217,7 @@ async def partager(
 ) -> str:
     """Crée un transfert anonyme / envoi rapide et y téléverse le fichier."""
     client, _ = await _creer_client_authentifie()
-    async with client:
+    try:
         maintenant = datetime.now(tz=UTC)
         horodatage = maintenant.strftime("%Y-%m-%d %H.%M.%S")
         # Nom sans caractère '?' pour éviter l'erreur 400 (code 5018) de S-Filer
@@ -241,6 +246,8 @@ async def partager(
         resp = await client.post("/api/v3/http/anonymous-transfer", json=payload)
         resp.raise_for_status()
         transfer_info = resp.json()
+    finally:
+        await client.aclose()
 
     # Si un chemin local est fourni et que l'API retourne un nodeId / folderId, on téléverse le fichier dedans
     node_id = str(transfer_info.get("nodeId") or transfer_info.get("folderId") or "")
@@ -253,7 +260,7 @@ async def partager(
 async def lister_activite(jours: int = 7) -> str:
     """Liste l'activité récente sur le compte S-Filer."""
     client, _ = await _creer_client_authentifie()
-    async with client:
+    try:
         resp = await client.get(
             "/RecentFilesAjax.action",
             params={
@@ -268,3 +275,5 @@ async def lister_activite(jours: int = 7) -> str:
         )
         resp.raise_for_status()
         return resp.text
+    finally:
+        await client.aclose()
