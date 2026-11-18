@@ -67,8 +67,15 @@ async def televerser(fichier: str, node_id: str = "") -> str:
     return security.nettoyer_sortie(resultat)
 =======
 async def televerser(fichier: str, dossier: str = "", communaute: str = "") -> str:
-    """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
-    client, csrf_token = await _creer_client_authentifie()
+    """Téléverse un fichier local vers un dossier ou une communauté S-Filer."""
+
+    if alerte := security.valider_chemin_local(fichier):
+        return alerte
+
+    for valeur, nom in ((dossier, "dossier"), (communaute, "communaute")):
+        if alerte := security.valider_texte_sfiler(valeur, nom):
+            return alerte
+
     try:
         node_id = ""
         if communaute:
@@ -78,7 +85,7 @@ async def televerser(fichier: str, dossier: str = "", communaute: str = "") -> s
         return await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
     finally:
         await client.aclose()
->>>>>>> f1426fc7949d549e4b3b9036a0301d1a0be68b4e
+
 
 
 @mcp.tool()

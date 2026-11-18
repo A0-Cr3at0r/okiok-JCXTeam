@@ -265,10 +265,15 @@ async def _televerser_avec_session(
     return upload_resp.text
 
 
-async def televerser(fichier: str, node_id: str = "") -> str:
+async def televerser(fichier: str, dossier: str = "", communaute: str = "") -> str:
     """Téléverse un fichier local chiffré vers S-Filer via ajaxupload."""
     client, csrf_token = await _creer_client_authentifie()
     try:
+        node_id = ""
+        if communaute:
+            node_id = await _obtenir_noeud_racine(client, csrf_token, communaute=communaute)
+        elif dossier.isdigit():
+            node_id = dossier
         return await _televerser_avec_session(client, csrf_token, fichier, node_id=node_id)
     finally:
         await client.aclose()
