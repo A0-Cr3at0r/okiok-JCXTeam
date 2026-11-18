@@ -1,11 +1,22 @@
+import json
 import re
+import secrets
+import time
 from pathlib import Path
+from typing import Any
+
+_DEMANDES_PARTAGE: dict[str, dict[str, Any]] = {}
+CONFIRMATION_TTL_SECONDES = 300  # 5 minutes
 
 
-def nettoyer_sortie(donnees: str) -> str:
-    """Neutralise l'injection indirecte et le Memory Poisoning."""
+def nettoyer_sortie(donnees: Any) -> str:
+    """Neutralise l'injection indirecte et le Memory Poisoning en encapsulant les données."""
+    if isinstance(donnees, (dict, list)):
+        texte = json.dumps(donnees, indent=2, ensure_ascii=False)
+    else:
+        texte = str(donnees)
 
-    contenu_sain = str(donnees).replace("</untrusted_data>", "[/untrusted_data]")
+    contenu_sain = texte.replace("</untrusted_data>", "[/untrusted_data]")
 
     return (
         "<untrusted_data>\n"
@@ -16,8 +27,7 @@ def nettoyer_sortie(donnees: str) -> str:
 
 
 def valider_chemin_local(chemin_fichier: str, dossier_base: Path | None = None) -> str | None:
-    """Prévient le Path Traversal, les Null Bytes, l'acces au fichiers et dossiers cachés et les liens symboliques malveillants."""
-
+    """Prévient le Path Traversal, les Null Bytes, l'accès aux fichiers et dossiers cachés et l'évasion par liens symboliques."""
     if not chemin_fichier or "\x00" in chemin_fichier:
         return "ERREUR SÉCURITÉ : Chemin de fichier invalide."
 
@@ -37,33 +47,85 @@ def valider_chemin_local(chemin_fichier: str, dossier_base: Path | None = None) 
 
     return None
 
+
 def valider_texte_sfiler(valeur: str, nom_champ: str, max_len: int = 120) -> str | None:
-    """Prévient le Downstream System Injection vers l'API REST."""
+    """Prévient le Downstream System Injection (LDAP, SQL, XSS, Command injection)."""
+    if not valeur:
+        return None
 
     if len(valeur) > max_len:
         return f"ERREUR : Le champ '{nom_champ}' dépasse {max_len} caractères."
 
-    if re.search(r"[\x00-\x1f\x7f<>\"';]", valeur):
-        return f"ERREUR SÉCURITÉ : Caractères non autorisés dans '{nom_champ}'."
+    if any(ord(c) < 32 or ord(c) == 127 for c in valeur):
+        return f"ERREUR SÉCURITÉ : Caractères de contrôle non autorisés dans '{nom_champ}'."
+
+    if not re.match(r"^[\w\s\-\.@À-ÿ,!?():/]*$", valeur, re.UNICODE):
+        return (
+            f"ERREUR SÉCURITÉ : Caractères suspects ou non autorisés dans '{nom_champ}'. "
+            "Seuls les caractères alphanumériques, espaces et ponctuation courante sont acceptés."
+        )
+
+    if re.search(r"[<>'\"`;\\]", valeur):
+        return f"ERREUR SÉCURITÉ : Caractères d'injection interdits dans '{nom_champ}'."
+
     return None
 
 
 def verifier_partage(
-    fichier: str, destinataire: str, expiration_jours: int, confirme: bool) -> str | None:
-    """Prévient le Tool-Chain Escalation et l'exfiltration non autorisée."""
-
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", destinataire):
-        return f"ERREUR : L'adresse courriel '{destinataire}' est invalide."
+    fichier: str,
+    destinataire: str,
+    expiration_jours: int,
+    message: str = "",
+    code_confirmation: str = "",
+    confirme: bool = False,
+) -> tuple[bool, str]:
+    """Prévient le Tool-Chain Escalation, l'exfiltration et le détournement par prompt injection (anti-jailbreak)."""
+    
+    if not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", destinataire):
+        return False, f"ERREUR : L'adresse courriel '{destinataire}' est invalide."
 
     if not (1 <= expiration_jours <= 30):
-        return "ERREUR : La durée d'expiration doit être comprise entre 1 et 30 jours."
+        return False, "ERREUR : La durée d'expiration doit être comprise entre 1 et 30 jours."
 
-    if not confirme:
-        return (
-            "CONFIRMATION REQUISE : Demande explicitement à l'utilisateur s'il approuve ce partage "
-            f"-> Fichier : '{fichier}' | Destinataire : '{destinataire}' | "
-            f"Expiration : {expiration_jours} jours. Rappelle cet outil avec confirme=True "
-            "uniquement après son accord explicite."
+    maintenant = time.time()
+    # Nettoyage des codes expirés
+    cles_a_supprimer = [
+        k for k, v in _DEMANDES_PARTAGE.items() if maintenant - v["timestamp"] > CONFIRMATION_TTL_SECONDES
+    ]
+    for k in cles_a_supprimer:
+        del _DEMANDES_PARTAGE[k]
+
+    code_nettoye = code_confirmation.strip().upper()
+
+    if not code_nettoye:
+        nouveau_code = secrets.token_hex(3).upper()
+        _DEMANDES_PARTAGE[nouveau_code] = {
+            "fichier": Path(fichier).name,
+            "destinataire": destinataire.lower(),
+            "expiration_jours": expiration_jours,
+            "timestamp": maintenant,
+        }
+        return False, (
+            "CONFIRMATION REQUISE : Demande explicitement à l'utilisateur s'il approuve ce partage externe :\n"
+            f"• Fichier : '{fichier}'\n"
+            f"• Destinataire : '{destinataire}'\n"
+            f"• Durée d'expiration : {expiration_jours} jours\n"
+            f"• Message : '{message or '(aucun)'}'\n"
+            f"• Code de confirmation : {nouveau_code}\n"
+            f"L'outil DOIT être rappelé avec code_confirmation='{nouveau_code}' (et confirme=True) UNIQUEMENT après accord explicite de l'utilisateur."
         )
 
-    return None
+    demande = _DEMANDES_PARTAGE.get(code_nettoye)
+    if not demande:
+        return False, "ERREUR SÉCURITÉ : Code de confirmation invalide ou expiré. Veuillez relancer la demande de partage pour générer un nouveau code."
+
+    if (
+        demande["fichier"] != Path(fichier).name
+        or demande["destinataire"] != destinataire.lower()
+        or demande["expiration_jours"] != expiration_jours
+    ):
+        del _DEMANDES_PARTAGE[code_nettoye]
+        return False, "ERREUR SÉCURITÉ : Les paramètres du partage ne correspondent pas au code de confirmation généré. Opération annulée."
+
+    del _DEMANDES_PARTAGE[code_nettoye]
+    return True, "CONFIRMATION_OK"
