@@ -249,67 +249,18 @@ from . import security, sfiler_client
 
 L'option `-m` permet à Python d'exécuter `okiokdefi.server` en tant que module du package `okiokdefi`. Python peut ainsi résoudre correctement les imports relatifs.
 
-### Intégration avec VS Code et GitHub Copilot
+### Intégration avec Antigravity
 
-Le serveur peut être intégré directement à **Visual Studio Code** afin que GitHub Copilot puisse découvrir et utiliser ses outils MCP.
+Le serveur peut être intégré directement à **Antigravity** (Antigravity CLI ou Antigravity IDE) afin que l'agent IA puisse découvrir et exploiter ses outils MCP en langage naturel.
 
-Deux possibilités sont disponibles :
+Deux possibilités de configuration sont disponibles :
 
-- **Configuration globale Copilot** : le serveur est disponible dans les espaces de travail Copilot de l'utilisateur. Cette option évite d'ajouter un fichier de configuration au dépôt.
-- **Configuration au niveau du projet** : le fichier `.mcp.json` est placé à la racine du dépôt et peut être partagé avec les autres collaborateurs.
+- **Configuration au niveau du projet** (recommandée) : via un fichier `.mcp.json` placé à la racine du dépôt.
+- **Configuration globale Antigravity** : ajout du serveur dans la configuration globale d'Antigravity (`~/.gemini/antigravity-cli/mcp/` ou `%USERPROFILE%\.gemini\antigravity-cli\mcp\`).
 
-#### Option 1 — Configuration globale (recommandée)
+#### Option 1 — Configuration au niveau du projet (recommandée)
 
-Sur Windows, le fichier de configuration global de Copilot se trouve normalement à l'emplacement suivant :
-
-```text
-%USERPROFILE%\.copilot\mcp-config.json
-```
-
-Il est possible de l'ouvrir directement depuis PowerShell :
-
-```powershell
-notepad "$env:USERPROFILE\.copilot\mcp-config.json"
-```
-
-Ajouter la configuration suivante :
-
-```json
-{
-  "mcpServers": {
-    "sfiler": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "-m",
-        "okiokdefi.server"
-      ],
-      "cwd": "C:\\CHEMIN\\VERS\\okiok-JCXTeam",
-      "tools": ["*"]
-    }
-  }
-}
-```
-
-Remplacer `C:\\CHEMIN\\VERS\\okiok-JCXTeam` par le chemin absolu du répertoire du projet, c'est-à-dire le dossier contenant `pyproject.toml`.
-
-**Explication des paramètres :**
-
-| Paramètre | Rôle |
-|---|---|
-| `type` | Définit le transport utilisé. `stdio` permet une communication locale par entrée/sortie standard. |
-| `command` | Commande exécutée pour démarrer le serveur. |
-| `args` | Arguments transmis à `uv` pour lancer le module Python. |
-| `cwd` | Répertoire de travail du processus. Il permet notamment de retrouver le projet et son fichier `.env`. |
-| `tools` | Définit les outils exposés au client. `["*"]` rend tous les outils du serveur disponibles. |
-
-Le processus lancé par Copilot utilise directement l'environnement du projet grâce à `uv run`. Il n'est donc pas nécessaire de démarrer manuellement le serveur dans un terminal avant de l'utiliser.
-
-#### Option 2 — Configuration partageable avec le projet
-
-Pour partager la configuration MCP avec les autres développeurs, créer un fichier nommé `.mcp.json` à la racine du dépôt :
+Créer un fichier nommé `.mcp.json` à la racine du dépôt :
 
 ```text
 okiok-JCXTeam/
@@ -319,7 +270,7 @@ okiok-JCXTeam/
 └── src/
 ```
 
-Exemple de contenu :
+Contenu du fichier `.mcp.json` :
 
 ```json
 {
@@ -328,8 +279,51 @@ Exemple de contenu :
       "type": "stdio",
       "command": "uv",
       "args": [
+        "run",
+        "python",
+        "-m",
+        "okiokdefi.server"
+      ],
+      "cwd": "/CHEMIN/VERS/LE/PROJET",
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Remplacer `/CHEMIN/VERS/LE/PROJET` par le chemin absolu du répertoire du projet (ou `C:\\CHEMIN\\VERS\\LE\\PROJET` sous Windows), c'est-à-dire le dossier contenant `pyproject.toml`.
+
+**Explication des paramètres :**
+
+| Paramètre | Rôle |
+|---|---|
+| `type` | Définit le transport utilisé. `stdio` permet une communication locale par entrée/sortie standard. |
+| `command` | Commande exécutée pour démarrer le serveur (`uv`). |
+| `args` | Arguments transmis à `uv` pour lancer le module Python (`run python -m okiokdefi.server`). |
+| `cwd` | Répertoire de travail du processus. Il permet notamment de charger le projet et son fichier `.env`. |
+| `tools` | Définit les outils exposés à l'agent. `["*"]` rend tous les outils du serveur disponibles. |
+
+Le processus lancé par Antigravity utilise directement l'environnement virtuel du projet grâce à `uv run`. Il n'est donc pas nécessaire de démarrer manuellement le serveur dans un terminal séparé.
+
+#### Option 2 — Configuration globale Antigravity
+
+Sur votre machine, le répertoire de configuration des serveurs MCP d'Antigravity se trouve à l'emplacement suivant :
+
+```text
+~/.gemini/antigravity-cli/mcp/sfiler-mcp/
+```
+(ou sous Windows : `%USERPROFILE%\.gemini\antigravity-cli\mcp\sfiler-mcp\`)
+
+Exemple de bloc de configuration globale :
+
+```json
+{
+  "mcpServers": {
+    "sfiler": {
+      "command": "uv",
+      "args": [
         "--directory",
-        "C:\\CHEMIN\\VERS\\okiok-JCXTeam",
+        "/CHEMIN/VERS/LE/PROJET",
         "run",
         "python",
         "-m",
@@ -341,59 +335,39 @@ Exemple de contenu :
 }
 ```
 
-Remplacer le chemin par celui du dépôt sur la machine concernée.
-
-Cette configuration peut être versionnée dans Git. Toutefois, le chemin absolu doit être adapté à chaque environnement. Le fichier `.env`, qui contient les identifiants S-Filer, ne doit jamais être partagé dans le dépôt.
-
-#### Activation et vérification dans VS Code
+#### Activation et vérification dans Antigravity
 
 Après avoir enregistré la configuration :
 
-1. Ouvrir le projet dans VS Code.
-2. Ouvrir la palette de commandes avec `Ctrl + Shift + P`.
-3. Rechercher **Chat: Open Customizations**.
-4. Accéder à la section **MCP Servers**.
-5. Vérifier que le serveur `sfiler` apparaît dans la liste.
-6. Démarrer ou redémarrer le serveur si nécessaire.
-7. Ouvrir une conversation GitHub Copilot en mode Agent.
-
-Pour vérifier le fonctionnement, demander à Copilot d'utiliser un outil non destructif, par exemple :
+1. Lancer la session Antigravity (CLI ou IDE) dans le répertoire du projet.
+2. Vérifier que le serveur `sfiler` apparaît bien dans la liste des serveurs MCP actifs.
+3. Poser directement vos requêtes en langage naturel à Antigravity, par exemple :
 
 ```text
-Utilise l'outil lister_activite pour consulter les activités
-récentes de moompte S-Filer sur les 7 derniers jours.
+Liste l'activité récente sur S-Filer des 7 derniers jours.
 ```
 
-Il est également possible de tester la recherche :
+Ou pour tester la recherche :
 
 ```text
-Utilise l'outil rechercher_fichiers pour rechercher les fichiers
-contenant le mot-clé rapport.
+Quels fichiers ai-je reçus de akinlolaagboidji@gmail.com ce mois-ci ?
 ```
 
-La présence du serveur dans la configuration ne garantit pas à elle seule que les outils sont effectivement disponibles dans une session Copilot. Il faut vérifier que Copilot les découvre et peut les appeler.
+Antigravity convertit automatiquement la demande en appels d'outils MCP sécurisés, applique les validations requises et présente le compte rendu formaté.
 
 #### Dépannage
 
-En cas de problème de démarrage :
+En cas de problème de démarrage ou de découverte des outils :
 
-- Vérifier que `uv` est installé et accessible depuis le processus VS Code.
-- Vérifier que le chemin `cwd` ou `--directory` pointe vers le répertoire contenant `pyproject.toml`.
-- Vérifier que le fichier `.env` est présent à la racine du projet.
+- Vérifier que `uv` est installé et accessible dans le `PATH`.
+- Vérifier que le paramètre `cwd` ou `--directory` pointe bien vers le répertoire contenant `pyproject.toml`.
+- Vérifier que le fichier `.env` est présent à la racine du projet avec les identifiants S-Filer.
 - Vérifier la validité syntaxique du JSON de configuration.
 - Vérifier que les dépendances ont été installées avec `uv sync`.
 
-Si VS Code ne trouve pas la commande `uv`, récupérer son chemin avec PowerShell :
+Pour consulter les journaux d'erreurs ou logs du serveur MCP, vérifier les logs de session d'Antigravity.
 
-```powershell
-where.exe uv
-```
-
-Il est alors possible de remplacer `"command": "uv"` par le chemin absolu vers `uv.exe`, en échappant les antislashs dans le JSON.
-
-Pour consulter les erreurs du serveur, ouvrir la section **MCP Servers**, sélectionner `sfiler`, puis afficher **Show Output**.
-
-**Note de sécurité :** `tools: ["*"]` expose tous les outils du serveur à Copilot. Ce paramètre ne remplace pas les validations de sécurité implémentées dans le code Python. Il est important de vérifier les appels d'outils et de conserver une confirmation explicite pour les opérations sensibles.
+**Note de sécurité :** `tools: ["*"]` expose tous les outils du serveur à Antigravity. Ce paramètre ne remplace pas les validations de sécurité implémentées dans le code Python : toute action irréversible ou externe (ex. `partager`) requiert impérativement un code de confirmation éphémère approuvé par l'utilisateur.
 
 ---
 
