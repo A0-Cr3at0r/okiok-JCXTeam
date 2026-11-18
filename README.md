@@ -249,9 +249,157 @@ from . import security, sfiler_client
 
 L'option `-m` permet à Python d'exécuter `okiokdefi.server` en tant que module du package `okiokdefi`. Python peut ainsi résoudre correctement les imports relatifs.
 
-### Intégration avec un client MCP
+### Intégration avec VS Code et GitHub Copilot
 
-Pour intégrer le serveur à un client MCP, il faut configurer celui-ci afin qu'il exécute la commande de démarrage avec le répertoire du projet comme répertoire de travail.
+Le serveur peut être intégré directement à **Visual Studio Code** afin que GitHub Copilot puisse découvrir et utiliser ses outils MCP.
+
+Deux possibilités sont disponibles :
+
+- **Configuration globale Copilot** : le serveur est disponible dans les espaces de travail Copilot de l'utilisateur. Cette option évite d'ajouter un fichier de configuration au dépôt.
+- **Configuration au niveau du projet** : le fichier `.mcp.json` est placé à la racine du dépôt et peut être partagé avec les autres collaborateurs.
+
+#### Option 1 — Configuration globale (recommandée)
+
+Sur Windows, le fichier de configuration global de Copilot se trouve normalement à l'emplacement suivant :
+
+```text
+%USERPROFILE%\.copilot\mcp-config.json
+```
+
+Il est possible de l'ouvrir directement depuis PowerShell :
+
+```powershell
+notepad "$env:USERPROFILE\.copilot\mcp-config.json"
+```
+
+Ajouter la configuration suivante :
+
+```json
+{
+  "mcpServers": {
+    "sfiler": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "okiokdefi.server"
+      ],
+      "cwd": "C:\\CHEMIN\\VERS\\okiok-JCXTeam",
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Remplacer `C:\\CHEMIN\\VERS\\okiok-JCXTeam` par le chemin absolu du répertoire du projet, c'est-à-dire le dossier contenant `pyproject.toml`.
+
+**Explication des paramètres :**
+
+| Paramètre | Rôle |
+|---|---|
+| `type` | Définit le transport utilisé. `stdio` permet une communication locale par entrée/sortie standard. |
+| `command` | Commande exécutée pour démarrer le serveur. |
+| `args` | Arguments transmis à `uv` pour lancer le module Python. |
+| `cwd` | Répertoire de travail du processus. Il permet notamment de retrouver le projet et son fichier `.env`. |
+| `tools` | Définit les outils exposés au client. `["*"]` rend tous les outils du serveur disponibles. |
+
+Le processus lancé par Copilot utilise directement l'environnement du projet grâce à `uv run`. Il n'est donc pas nécessaire de démarrer manuellement le serveur dans un terminal avant de l'utiliser.
+
+#### Option 2 — Configuration partageable avec le projet
+
+Pour partager la configuration MCP avec les autres développeurs, créer un fichier nommé `.mcp.json` à la racine du dépôt :
+
+```text
+okiok-JCXTeam/
+├── .mcp.json
+├── pyproject.toml
+├── uv.lock
+└── src/
+```
+
+Exemple de contenu :
+
+```json
+{
+  "mcpServers": {
+    "sfiler": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:\\CHEMIN\\VERS\\okiok-JCXTeam",
+        "run",
+        "python",
+        "-m",
+        "okiokdefi.server"
+      ],
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Remplacer le chemin par celui du dépôt sur la machine concernée.
+
+Cette configuration peut être versionnée dans Git. Toutefois, le chemin absolu doit être adapté à chaque environnement. Le fichier `.env`, qui contient les identifiants S-Filer, ne doit jamais être partagé dans le dépôt.
+
+#### Activation et vérification dans VS Code
+
+Après avoir enregistré la configuration :
+
+1. Ouvrir le projet dans VS Code.
+2. Ouvrir la palette de commandes avec `Ctrl + Shift + P`.
+3. Rechercher **Chat: Open Customizations**.
+4. Accéder à la section **MCP Servers**.
+5. Vérifier que le serveur `sfiler` apparaît dans la liste.
+6. Démarrer ou redémarrer le serveur si nécessaire.
+7. Ouvrir une conversation GitHub Copilot en mode Agent.
+
+Pour vérifier le fonctionnement, demander à Copilot d'utiliser un outil non destructif, par exemple :
+
+```text
+Utilise l'outil lister_activite pour consulter les activités
+récentes de mon compte S-Filer sur les 7 derniers jours.
+```
+
+Il est également possible de tester la recherche :
+
+```text
+Utilise l'outil rechercher_fichiers pour rechercher les fichiers
+contenant le mot-clé rapport.
+```
+
+La présence du serveur dans la configuration ne garantit pas à elle seule que les outils sont effectivement disponibles dans une session Copilot. Il faut vérifier que Copilot les découvre et peut les appeler.
+
+#### Dépannage
+
+En cas de problème de démarrage :
+
+- Vérifier que `uv` est installé et accessible depuis le processus VS Code.
+- Vérifier que le chemin `cwd` ou `--directory` pointe vers le répertoire contenant `pyproject.toml`.
+- Vérifier que le fichier `.env` est présent à la racine du projet.
+- Vérifier la validité syntaxique du JSON de configuration.
+- Vérifier que les dépendances ont été installées avec `uv sync`.
+
+Si VS Code ne trouve pas la commande `uv`, récupérer son chemin avec PowerShell :
+
+```powershell
+where.exe uv
+```
+
+Il est alors possible de remplacer `"command": "uv"` par le chemin absolu vers `uv.exe`, en échappant les antislashs dans le JSON.
+
+Pour consulter les erreurs du serveur, ouvrir la section **MCP Servers**, sélectionner `sfiler`, puis afficher **Show Output**.
+
+**Note de sécurité :** `tools: ["*"]` expose tous les outils du serveur à Copilot. Ce paramètre ne remplace pas les validations de sécurité implémentées dans le code Python. Il est important de vérifier les appels d'outils et de conserver une confirmation explicite pour les opérations sensibles.
+
+---
+
+### Intégration avec un autre client MCP
+
+Pour un autre client MCP prenant en charge le transport STDIO, il faut configurer celui-ci afin qu'il exécute la commande de démarrage avec le répertoire du projet comme répertoire de travail.
 
 Exemple de configuration générique :
 
